@@ -6,7 +6,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { blankTrip, normalizeTrip, DEFAULT_RATES, TRIP_ICONS, CATEGORIES } = require('../app.js');
+const { blankTrip, normalizeTrip, tripTotalCents, DEFAULT_RATES, TRIP_ICONS, CATEGORIES } = require('../app.js');
 
 const TODAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -160,6 +160,29 @@ describe('normalizeTrip — expenses', () => {
 
   test('an unknown currency falls back to the base currency', () => {
     assert.equal(withPeople([{ id: 'e1', payerId: 'p1', participants: ['p1'], currency: 'ZZZ' }]).expenses[0].currency, 'SGD');
+  });
+
+  test('a rate saved against an unknown currency does not survive the fall back', () => {
+    // the currency is not one we know, so it becomes SGD — and an SGD
+    // expense converted at 0.5 would report half of what was spent
+    const t = withPeople([{ id: 'e1', payerId: 'p1', participants: ['p1'], amount: 100, currency: 'ZZZ', rate: 0.5 }]);
+    assert.equal(t.expenses[0].currency, 'SGD');
+    assert.equal(t.expenses[0].rate, 1);
+    assert.equal(tripTotalCents(t), 10000, 'S$100 is still S$100');
+  });
+
+  test('an SGD expense is always rate 1, whatever was saved against it', () => {
+    for (const rate of [0.5, 2, 0.0088]) {
+      const t = withPeople([{ id: 'e1', payerId: 'p1', participants: ['p1'], amount: 100, currency: 'SGD', rate }]);
+      assert.equal(t.expenses[0].rate, 1, `rate ${rate}`);
+      assert.equal(tripTotalCents(t), 10000, `rate ${rate}`);
+    }
+  });
+
+  test('a real foreign rate is still kept exactly as saved', () => {
+    const t = withPeople([{ id: 'e1', payerId: 'p1', participants: ['p1'], amount: 168000, currency: 'JPY', rate: 0.0091 }]);
+    assert.equal(t.expenses[0].rate, 0.0091, 'editing the rate table must not rewrite history');
+    assert.equal(tripTotalCents(t), 152880);
   });
 
   test('a missing rate is taken from the defaults for that currency', () => {

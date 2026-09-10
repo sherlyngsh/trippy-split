@@ -112,21 +112,30 @@ function normalizeTrip(t) {
   const ids = new Set(trip.people.map(p => p.id));
   trip.expenses = (Array.isArray(t.expenses) ? t.expenses : [])
     .filter(e => e && e.id && ids.has(e.payerId))
-    .map(e => ({
-      id: e.id, created: e.created || Date.now(),
-      title: String(e.title || 'Expense').slice(0, 60),
-      amount: Number(e.amount) || 0,
-      currency: CUR[e.currency] ? e.currency : BASE,
-      rate: Number(e.rate) > 0 ? Number(e.rate) : (DEFAULT_RATES[e.currency] || 1),
-      category: CAT[e.category] ? e.category : 'other',
-      date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
-      payerId: e.payerId,
-      participants: (Array.isArray(e.participants) ? e.participants : []).filter(id => ids.has(id)),
-      splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
-      note: String(e.note || '').slice(0, 120),
-      shares: e.shares && typeof e.shares === 'object' ? e.shares : {},
-      exact: e.exact && typeof e.exact === 'object' ? e.exact : {},
-    }))
+    .map(e => {
+      const currency = CUR[e.currency] ? e.currency : BASE;
+      const saved = Number(e.rate);
+      /* Resolve the rate against the currency we settled on, not the one
+         that was asked for: a rate saved against a currency we do not know
+         must not survive the fall back to SGD, or the expense would come
+         back converted at a rate for nothing. SGD is the base, so it is
+         always 1 — the same rule submitExpense applies. */
+      const rate = currency === BASE ? 1 : (saved > 0 ? saved : DEFAULT_RATES[currency]);
+      return {
+        id: e.id, created: e.created || Date.now(),
+        title: String(e.title || 'Expense').slice(0, 60),
+        amount: Number(e.amount) || 0,
+        currency, rate,
+        category: CAT[e.category] ? e.category : 'other',
+        date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
+        payerId: e.payerId,
+        participants: (Array.isArray(e.participants) ? e.participants : []).filter(id => ids.has(id)),
+        splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
+        note: String(e.note || '').slice(0, 120),
+        shares: e.shares && typeof e.shares === 'object' ? e.shares : {},
+        exact: e.exact && typeof e.exact === 'object' ? e.exact : {},
+      };
+    })
     .filter(e => e.participants.length);
   trip.settlements = (Array.isArray(t.settlements) ? t.settlements : [])
     .filter(s => s && ids.has(s.fromId) && ids.has(s.toId) && Number(s.cents) > 0)
