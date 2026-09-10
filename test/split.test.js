@@ -94,9 +94,27 @@ describe('splitOf — by shares', () => {
     assert.equal(sumOf(parts), 3000);
   });
 
-  test('all-zero shares split to nothing, leaving the payer out of pocket', () => {
-    // there is no sane weighting left, so the app declines to guess
-    assert.deepEqual(shared({ p1: 0, p2: 0, p3: 0 }), { p1: 0, p2: 0, p3: 0 });
+  test('falls back to an equal split when no shares are left to weight by', () => {
+    // charging the bill to nobody would leave the payer quietly out of
+    // pocket, with no debt for the settle plan to clear
+    const parts = shared({ p1: 0, p2: 0, p3: 0 });
+    assert.deepEqual(parts, { p1: 1000, p2: 1000, p3: 1000 });
+    assert.equal(sumOf(parts), 3000);
+  });
+
+  test('a bill whose only share-holder has been removed is still shared out', () => {
+    // Cy held the only share and has since left the trip
+    const t = trip(['Ann', 'Bo']);
+    const parts = splitOf(expense({
+      amount: 60, participants: ['p1', 'p2'], splitMode: 'shares',
+      shares: { p1: 0, p2: 0, p3: 3 },
+    }), t);
+    assert.deepEqual(parts, { p1: 3000, p2: 3000 });
+  });
+
+  test('all-negative shares are clamped and then split equally', () => {
+    const parts = shared({ p1: -1, p2: -2, p3: -3 });
+    assert.deepEqual(parts, { p1: 1000, p2: 1000, p3: 1000 });
   });
 
   test('uneven shares still tie to the total', () => {

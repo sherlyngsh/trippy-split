@@ -66,6 +66,22 @@ describe('balancesFor', () => {
     assert.equal(sumOf(owed), sumOf(paid));
   });
 
+  test('a bill whose only share-holder has left is still charged to someone', () => {
+    // Cy held the only share and has since been removed from the trip.
+    // If nobody is charged, Ann is S$60 out of pocket with no debt for
+    // the settle plan to clear and nothing on screen to say why.
+    const t = trip(['Ann', 'Bo']);
+    t.expenses = [expense({
+      amount: 60, payerId: 'p1', participants: ['p1', 'p2'],
+      splitMode: 'shares', shares: { p1: 0, p2: 0, p3: 3 },
+    })];
+    const { paid, owed, net } = balancesFor(t);
+    assert.equal(sumOf(owed), sumOf(paid), 'what everyone owes adds up to what was spent');
+    assert.equal(sumOf(net), 0);
+    assert.deepEqual(net, { p1: 3000, p2: -3000 });
+    assert.deepEqual(settlePlan(net, t), [{ fromId: 'p2', toId: 'p1', cents: 3000 }]);
+  });
+
   test('an expense paid by someone off the trip is not credited to anyone', () => {
     const t = tripWith([{ amount: 30, payerId: 'ghost' }]);
     const { paid, owed, net } = balancesFor(t);
@@ -223,11 +239,7 @@ describe('the books always balance', () => {
           amount, rate: 1, payerId: ids[(seed + k) % size],
           participants: parts, splitMode: mode, shares: {}, exact: {},
         });
-        if (mode === 'shares') {
-          parts.forEach((id, i) => e.shares[id] = (i + seed) % 4);
-          // the form refuses to save shares that add up to zero, so neither does the sweep
-          if (!parts.some(id => e.shares[id] > 0)) e.shares[parts[0]] = 1;
-        }
+        if (mode === 'shares') parts.forEach((id, i) => e.shares[id] = (i + seed) % 4);
         if (mode === 'exact') {
           let left = Math.round(amount * 100);
           parts.forEach((id, i) => {
