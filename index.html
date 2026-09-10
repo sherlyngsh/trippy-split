@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trippy Split — Holiday Expense Tracker</title>
+<meta name="description" content="Track travel expenses with friends, split the bill and see who owes who — in SGD and any currency.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B4%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="sky" aria-hidden="true">
+  <div class="sun"></div>
+  <div class="cloud cloud-a"></div>
+  <div class="cloud cloud-b"></div>
+  <div class="cloud cloud-c"></div>
+</div>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">🌴</span>
+      <div class="brand-text">
+        <div id="brand-static">
+          <h1 class="brand-title">Trippy Split</h1>
+          <p class="brand-sub" id="brand-sub">Holiday expenses, split without the squabbles</p>
+        </div>
+        <div id="brand-trip" hidden>
+          <input id="trip-name" class="trip-name" value="Our Holiday" aria-label="Trip name" maxlength="40">
+          <p class="brand-sub" id="trip-sub"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="action-group" id="actions-trips" hidden>
+        <span class="whoami" id="whoami"></span>
+        <button class="btn btn-ghost" id="btn-signout" type="button">Sign out</button>
+      </div>
+
+      <div class="action-group" id="actions-trip" hidden>
+        <button class="btn btn-ghost" id="btn-back" type="button">← All trips</button>
+        <label class="me-picker">
+          <span>I am</span>
+          <select id="me-select" aria-label="Which traveller are you?"></select>
+        </label>
+        <button class="btn btn-ghost" id="btn-rates" type="button">💱 FX rates</button>
+        <div class="menu">
+          <button class="btn btn-ghost" id="btn-menu" type="button" aria-expanded="false" aria-haspopup="true">⋯ More</button>
+          <div class="menu-pop" id="menu-pop" hidden>
+            <button type="button" data-act="summary">📋 Copy summary</button>
+            <button type="button" data-act="export">⬇️ Export this trip</button>
+            <button type="button" data-act="import">⬆️ Import into this trip</button>
+            <button type="button" data-act="clear">🧽 Clear all expenses</button>
+            <button type="button" data-act="delete" class="danger">🗑️ Delete this trip</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ BLOCKED: no Web Crypto ============ -->
+  <section class="view" id="view-blocked" hidden>
+    <div class="auth-card">
+      <div class="auth-hero">🔐</div>
+      <h2>This browser won&rsquo;t let us hash passwords</h2>
+      <p class="auth-sub">Trippy Split needs the Web Crypto API to store your password safely, and it isn&rsquo;t available here.</p>
+      <p class="auth-note">Serving the folder over localhost fixes it. From the project folder run either of these, then open the address it prints:</p>
+      <pre class="code-block">npx serve .
+python -m http.server 8000</pre>
+    </div>
+  </section>
+
+  <!-- ============ SIGN IN / SIGN UP ============ -->
+  <section class="view" id="view-auth" hidden>
+    <div class="auth-card">
+      <div class="auth-hero">🧳 ✈️ 🌴</div>
+      <h2 id="auth-title">Welcome back</h2>
+      <p class="auth-sub" id="auth-sub">Sign in to pick up where your trip left off.</p>
+
+      <div class="auth-tabs" role="tablist" aria-label="Sign in or create an account">
+        <button type="button" role="tab" data-auth-tab="in" class="on" aria-selected="true">Sign in</button>
+        <button type="button" role="tab" data-auth-tab="up" aria-selected="false">Create account</button>
+      </div>
+
+      <form id="auth-form" autocomplete="on">
+        <div class="field">
+          <label for="auth-user">Username</label>
+          <input id="auth-user" type="text" autocomplete="username" maxlength="20" required
+                 placeholder="sherlyn" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="auth-pass">Password</label>
+          <div class="pw">
+            <input id="auth-pass" type="password" autocomplete="current-password" required placeholder="••••••••">
+            <button type="button" class="pw-eye" id="auth-eye" aria-label="Show password" aria-pressed="false">👁️</button>
+          </div>
+          <p class="hint" id="auth-pass-hint" hidden>At least 8 characters.</p>
+        </div>
+        <div class="field" id="auth-confirm-field" hidden>
+          <label for="auth-confirm">Confirm password</label>
+          <input id="auth-confirm" type="password" autocomplete="new-password" placeholder="••••••••">
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="auth-remember" checked>
+          <span>Keep me signed in on this device</span>
+        </label>
+
+        <p class="auth-error" id="auth-error" hidden role="alert"></p>
+        <button class="btn btn-big btn-sun" id="auth-submit" type="submit">Sign in 🌞</button>
+      </form>
+
+      <p class="auth-alt">
+        <button type="button" class="link" id="auth-demo">or have a look around with a demo account</button>
+      </p>
+      <p class="auth-note">
+        🔒 Accounts live only in this browser. Passwords are salted and stretched with
+        PBKDF2-SHA256 before being stored, but anything kept in a browser is readable by
+        whoever uses that browser — so this is a sign-in gate, not real security.
+        <b>Please don&rsquo;t reuse a password that matters.</b>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ TRIPS DASHBOARD ============ -->
+  <section class="view" id="view-trips" hidden>
+    <div class="trips-head">
+      <div>
+        <h2 class="section-title">Your trips</h2>
+        <p class="dim" id="trips-count"></p>
+      </div>
+      <div class="trips-head-actions">
+        <button class="btn btn-ghost" id="btn-sample-trip" type="button">🎒 Add sample trip</button>
+        <button class="btn btn-sun" id="btn-new-trip" type="button">＋ New trip</button>
+      </div>
+    </div>
+
+    <form class="card card-accent" id="new-trip-form" hidden>
+      <div class="card-head"><h2>🗺️ Start a new trip</h2></div>
+      <div class="field-row">
+        <div class="field">
+          <label for="trip-new-name">Trip name</label>
+          <input id="trip-new-name" type="text" placeholder="e.g. Tokyo, 5 days" maxlength="40" required>
+        </div>
+        <div class="field field-cur">
+          <label for="trip-new-emoji">Icon</label>
+          <select id="trip-new-emoji"></select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="trip-new-from">Starts <span class="dim">(optional)</span></label>
+          <input id="trip-new-from" type="date">
+        </div>
+        <div class="field">
+          <label for="trip-new-to">Ends <span class="dim">(optional)</span></label>
+          <input id="trip-new-to" type="date">
+        </div>
+      </div>
+      <div class="field">
+        <label for="trip-new-people">Travellers <span class="dim">(comma separated, optional)</span></label>
+        <input id="trip-new-people" type="text" placeholder="Sherlyn, Wei Ming, Priya, Ben">
+      </div>
+      <p class="auth-error" id="new-trip-error" hidden role="alert"></p>
+      <div class="dlg-actions">
+        <button class="btn btn-ghost" id="btn-cancel-trip" type="button">Cancel</button>
+        <button class="btn btn-sun" type="submit">Create trip 🎉</button>
+      </div>
+    </form>
+
+    <ul class="trip-grid" id="trip-grid"></ul>
+    <p class="empty" id="trips-empty">No trips yet. Hit <b>＋ New trip</b> to start one — or load the sample trip to see how it all works. 🌞</p>
+  </section>
+
+  <!-- ============ ONE TRIP ============ -->
+  <section class="view" id="view-trip" hidden>
+
+    <div id="you-banner" class="you-banner" hidden></div>
+
+    <section class="tiles" aria-label="Trip totals">
+      <div class="tile">
+        <span class="tile-label">Total spent</span>
+        <strong class="tile-value" id="stat-total">S$0.00</strong>
+        <span class="tile-note" id="stat-count">no expenses yet</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Per person</span>
+        <strong class="tile-value" id="stat-avg">S$0.00</strong>
+        <span class="tile-note" id="stat-people">0 travellers</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Biggest category</span>
+        <strong class="tile-value" id="stat-cat">—</strong>
+        <span class="tile-note" id="stat-cat-note">&nbsp;</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Still to settle</span>
+        <strong class="tile-value" id="stat-settle">S$0.00</strong>
+        <span class="tile-note" id="stat-settle-note">all square</span>
+      </div>
+    </section>
+
+    <div class="cols">
+      <div class="col-left">
+
+        <section class="card" id="card-people">
+          <div class="card-head">
+            <h2>🧳 Who&rsquo;s on the trip</h2>
+          </div>
+          <form id="person-form" class="row-add">
+            <input id="person-name" type="text" placeholder="Add a traveller…" maxlength="24" autocomplete="off">
+            <button class="btn btn-sun" type="submit">Add</button>
+          </form>
+          <ul class="people" id="people-list"></ul>
+          <p class="empty" id="people-empty">Add everyone first — then you can split things between them.</p>
+        </section>
+
+        <section class="card card-accent" id="card-expense">
+          <div class="card-head">
+            <h2 id="expense-form-title">🧾 Add an expense</h2>
+            <button class="btn btn-tiny btn-ghost" type="button" id="btn-cancel-edit" hidden>Cancel edit</button>
+          </div>
+
+          <form id="expense-form" autocomplete="off">
+            <div class="field">
+              <label for="exp-title">What was it?</label>
+              <input id="exp-title" type="text" placeholder="e.g. Dinner at the night market" maxlength="60" required>
+            </div>
+
+            <div class="field">
+              <label>Category</label>
+              <div class="chips" id="cat-chips" role="radiogroup" aria-label="Category"></div>
+            </div>
+
+            <div class="field-row">
+              <div class="field field-amount">
+                <label for="exp-amount">Amount</label>
+                <input id="exp-amount" type="number" step="0.01" min="0" placeholder="0.00" required inputmode="decimal">
+              </div>
+              <div class="field field-cur">
+                <label for="exp-currency">Currency</label>
+                <select id="exp-currency"></select>
+              </div>
+            </div>
+
+            <div class="fx-strip" id="fx-strip" hidden>
+              <div class="fx-line">
+                <span class="fx-eq" id="fx-preview">≈ S$0.00</span>
+                <button type="button" class="link" id="fx-toggle">edit rate</button>
+              </div>
+              <div class="fx-edit" id="fx-edit" hidden>
+                <label for="exp-rate">1 <span id="fx-code">USD</span> =</label>
+                <input id="exp-rate" type="number" step="0.0000001" min="0">
+                <span>SGD</span>
+              </div>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="exp-date">Date</label>
+                <input id="exp-date" type="date" required>
+              </div>
+              <div class="field">
+                <label for="exp-payer">Paid by</label>
+                <select id="exp-payer" required></select>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="label-row">
+                <label>Split between</label>
+                <div class="split-modes" id="split-modes" role="radiogroup" aria-label="Split method">
+                  <button type="button" data-mode="equal" class="on">Equally</button>
+                  <button type="button" data-mode="shares">By shares</button>
+                  <button type="button" data-mode="exact">Exact</button>
+                </div>
+              </div>
+              <div class="split-tools">
+                <button type="button" class="link" id="split-all">select everyone</button>
+                <button type="button" class="link" id="split-none">clear</button>
+              </div>
+              <ul class="split-list" id="split-list"></ul>
+              <p class="split-hint" id="split-hint"></p>
+            </div>
+
+            <div class="field">
+              <label for="exp-note">Note <span class="dim">(optional)</span></label>
+              <input id="exp-note" type="text" placeholder="e.g. we&rsquo;ll settle at the airport" maxlength="120">
+            </div>
+
+            <button class="btn btn-big btn-sun" type="submit" id="expense-submit">Add expense 🎉</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="col-right">
+
+        <section class="card" id="card-balances">
+          <div class="card-head">
+            <h2>⚖️ Who owes who</h2>
+          </div>
+          <div class="balances" id="balances"></div>
+
+          <div class="settle-block" id="settle-block" hidden>
+            <h3>🤝 Simplest way to settle up</h3>
+            <ul class="settle-list" id="settle-list"></ul>
+          </div>
+          <p class="empty" id="balances-empty">No expenses yet, so nobody owes anybody. Bliss.</p>
+
+          <div class="settled-log" id="settled-log" hidden>
+            <h3>✅ Payments already made</h3>
+            <ul id="settlements-list"></ul>
+          </div>
+        </section>
+
+        <section class="card" id="card-breakdown" hidden>
+          <div class="card-head">
+            <h2>📊 Where the money went</h2>
+            <span class="dim" id="breakdown-total"></span>
+          </div>
+          <div class="viz-root" id="breakdown"></div>
+        </section>
+
+        <section class="card" id="card-log">
+          <div class="card-head">
+            <h2>📖 Expense log</h2>
+            <div class="filters">
+              <select id="filter-person" aria-label="Filter by person"><option value="">Everyone</option></select>
+              <select id="filter-cat" aria-label="Filter by category"><option value="">All categories</option></select>
+            </div>
+          </div>
+          <ul class="log" id="log"></ul>
+          <p class="empty" id="log-empty">Nothing logged yet. Add your first holiday spend above! 🍹</p>
+        </section>
+
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Everything is saved in this browser only — no server, no cloud. Use <b>Export this trip</b> to back one up or pass it to a friend.</p>
+  </footer>
+</main>
+
+<dialog id="rates-dialog">
+  <form method="dialog" class="dlg">
+    <h2>💱 Exchange rates</h2>
+    <p class="dlg-sub">How many <b>Singapore dollars</b> one unit of each currency is worth. These are rough defaults — edit anything that looks off and new expenses will use it. Expenses you already saved keep the rate they were entered with.</p>
+    <div class="rates-grid" id="rates-grid"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn btn-ghost" id="rates-reset">Reset to defaults</button>
+      <button value="close" class="btn btn-sun">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="summary-dialog">
+  <form method="dialog" class="dlg">
+    <h2>📋 Trip summary</h2>
+    <p class="dlg-sub">Paste this into your group chat.</p>
+    <textarea id="summary-text" rows="14" readonly></textarea>
+    <div class="dlg-actions">
+      <button value="close" class="btn btn-ghost">Close</button>
+      <button type="button" class="btn btn-sun" id="summary-copy">Copy to clipboard</button>
+    </div>
+  </form>
+</dialog>
+
+<input type="file" id="import-file" accept="application/json,.json" hidden>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="auth.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

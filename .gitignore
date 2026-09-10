@@ -1,0 +1,15 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Node (the app itself needs no dependencies; this is for local tooling only)
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Local scratch
+*.bak
+*.log
