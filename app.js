@@ -94,6 +94,18 @@ function blankTrip(fields = {}) {
   }, fields);
 }
 
+/* Imported numbers can be anything at all — strings, null, objects. Coerce to a
+   finite number or fall back, so no NaN ever reaches the money maths. */
+const finiteOr = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+
+/* { personId: value } maps from an import, with every value made a sane number. */
+function sanitiseMap(m, fallback) {
+  if (!m || typeof m !== 'object') return {};
+  const out = {};
+  Object.keys(m).forEach(id => { out[id] = Math.max(0, finiteOr(m[id], fallback)); });
+  return out;
+}
+
 /* Trips arrive from storage (or an import) as untrusted JSON — fill in
    whatever the app expects and drop anything that no longer hangs together. */
 function normalizeTrip(t) {
@@ -124,14 +136,18 @@ function normalizeTrip(t) {
       participants: (Array.isArray(e.participants) ? e.participants : []).filter(id => ids.has(id)),
       splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
       note: String(e.note || '').slice(0, 120),
-      shares: e.shares && typeof e.shares === 'object' ? e.shares : {},
-      exact: e.exact && typeof e.exact === 'object' ? e.exact : {},
+      shares: sanitiseMap(e.shares, 1),
+      exact: sanitiseMap(e.exact, 0),
     }))
     .filter(e => e.participants.length);
   trip.settlements = (Array.isArray(t.settlements) ? t.settlements : [])
     .filter(s => s && ids.has(s.fromId) && ids.has(s.toId) && Number(s.cents) > 0)
     .map(s => ({ id: s.id || uid(), fromId: s.fromId, toId: s.toId, cents: Math.round(Number(s.cents)), date: s.date || todayISO() }));
-  trip.rates = Object.assign({ ...DEFAULT_RATES }, t.rates || {});
+  trip.rates = { ...DEFAULT_RATES };
+  Object.entries(t.rates && typeof t.rates === 'object' ? t.rates : {}).forEach(([code, v]) => {
+    const r = finiteOr(v, 0);
+    if (r > 0 && CUR[code]) trip.rates[code] = r;
+  });
   if (!trip.people.some(p => p.id === trip.meId)) trip.meId = null;
   return trip;
 }
@@ -194,7 +210,7 @@ function splitOf(exp, trip = state) {
 
   const weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
   const W = weights.reduce((a, b) => a + b, 0);
-  if (W <= 0) { ids.forEach(id => out[id] = 0); return out; }
+  if (!(W > 0)) { ids.forEach(id => out[id] = 0); return out; }
 
   const raw = weights.map(w => total * w / W);
   const floors = raw.map(Math.floor);
