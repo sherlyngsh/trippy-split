@@ -12,6 +12,7 @@ No build step, no dependencies, no server:
 ```
 start index.html         # Windows
 open index.html          # macOS
+node test.js             # the money maths and import guards (Node 14+)
 ```
 
 Everything is saved in the browser's `localStorage`. On the sign-in screen, **"have a
@@ -111,6 +112,12 @@ for *n* people.
 Trips are re-validated every time they come out of storage or an import: unknown
 currencies fall back to SGD, orphaned expenses and settlements are dropped, and the
 rate table is topped up with defaults.
+
+An imported file is treated as hostile, because it arrives from someone else's laptop.
+Ids must look like ids and are regenerated if they don't — with every reference to them
+rewritten, so nothing is orphaned by the rewrite. Avatars must be ones the app ships.
+Every rate, share and exact amount has to be a finite number, and participant lists are
+de-duplicated. `node test.js` covers all of it.
 
 ## Notes
 
