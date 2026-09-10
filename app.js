@@ -94,44 +94,122 @@ function blankTrip(fields = {}) {
   }, fields);
 }
 
+/* ---- guards for untrusted trips -----------------------------------
+   A trip can arrive from a file someone else exported, so nothing in it
+   is taken on trust: ids have to look like ids, avatars have to be ones
+   we ship, and every number has to actually be a number. */
+
+/* Ids end up inside HTML attributes, so keep them boring. */
+const ID_SHAPE = /^[A-Za-z0-9_-]{1,32}$/;
+const safeId = v => (typeof v === 'string' && ID_SHAPE.test(v)) ? v : uid();
+
+/* Number(v) alone lets NaN through, and NaN poisons every sum it
+   touches — Math.max(0, NaN) is NaN and NaN <= 0 is false, so the
+   usual guards miss it. */
+const num = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+
+/* { personId: amount } maps, with keys pointed at the surviving people
+   and every value forced to a non-negative number. */
+function numberMap(src, remap, fallback) {
+  const out = {};
+  if (src && typeof src === 'object') {
+    Object.keys(src).forEach(k => {
+      const id = remap[String(k)];
+      if (id) out[id] = Math.max(0, num(src[k], fallback));
+    });
+  }
+  return out;
+}
+
 /* Trips arrive from storage (or an import) as untrusted JSON — fill in
    whatever the app expects and drop anything that no longer hangs together. */
 function normalizeTrip(t) {
   const trip = blankTrip({
-    id: t.id || uid(),
+    id: safeId(t.id),
     name: String(t.name || t.tripName || 'Our Holiday').slice(0, 40),
     emoji: TRIP_ICONS.includes(t.emoji) ? t.emoji : TRIP_ICONS[0],
     from: t.from || '', to: t.to || '',
     created: t.created || Date.now(),
     updated: t.updated || Date.now(),
-    meId: t.meId || null,
   });
+
+  /* People first. A malformed or duplicated id is replaced, and
+     `remap` carries every old id to the one that survived so the
+     expenses below point at real people instead of being dropped. */
+  const remap = {};
+  const ids = new Set();
   trip.people = (Array.isArray(t.people) ? t.people : [])
     .filter(p => p && p.id && p.name)
-    .map((p, i) => ({ id: p.id, name: String(p.name).slice(0, 24), avatar: p.avatar || AVATARS[i % AVATARS.length] }));
-  const ids = new Set(trip.people.map(p => p.id));
+    .map((p, i) => {
+      let id = safeId(p.id);
+      if (ids.has(id)) id = uid();          // two people cannot share an id
+      ids.add(id);
+      const was = String(p.id);
+      if (!(was in remap)) remap[was] = id; // first claimant keeps the name
+      return {
+        id,
+        name: String(p.name).slice(0, 24),
+        avatar: AVATARS.includes(p.avatar) ? p.avatar : AVATARS[i % AVATARS.length],
+      };
+    });
+
+  const usedExpenseIds = new Set();
   trip.expenses = (Array.isArray(t.expenses) ? t.expenses : [])
-    .filter(e => e && e.id && ids.has(e.payerId))
-    .map(e => ({
-      id: e.id, created: e.created || Date.now(),
-      title: String(e.title || 'Expense').slice(0, 60),
-      amount: Number(e.amount) || 0,
-      currency: CUR[e.currency] ? e.currency : BASE,
-      rate: Number(e.rate) > 0 ? Number(e.rate) : (DEFAULT_RATES[e.currency] || 1),
-      category: CAT[e.category] ? e.category : 'other',
-      date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
-      payerId: e.payerId,
-      participants: (Array.isArray(e.participants) ? e.participants : []).filter(id => ids.has(id)),
-      splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
-      note: String(e.note || '').slice(0, 120),
-      shares: e.shares && typeof e.shares === 'object' ? e.shares : {},
-      exact: e.exact && typeof e.exact === 'object' ? e.exact : {},
-    }))
-    .filter(e => e.participants.length);
+    .map(e => {
+      if (!e || !e.id) return null;
+      const payerId = remap[String(e.payerId)];
+      if (!payerId) return null;            // whoever paid is no longer here
+      let id = safeId(e.id);
+      if (usedExpenseIds.has(id)) id = uid();
+      usedExpenseIds.add(id);
+      const rate = num(e.rate, 0);
+      return {
+        id, created: e.created || Date.now(),
+        title: String(e.title || 'Expense').slice(0, 60),
+        amount: num(e.amount, 0),
+        currency: CUR[e.currency] ? e.currency : BASE,
+        rate: rate > 0 ? rate : (DEFAULT_RATES[e.currency] || 1),
+        category: CAT[e.category] ? e.category : 'other',
+        date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
+        payerId,
+        /* de-duplicated: a repeated id would overwrite its own entry in
+           splitOf, so the parts would stop adding up to the total */
+        participants: [...new Set(
+          (Array.isArray(e.participants) ? e.participants : [])
+            .map(id2 => remap[String(id2)])
+            .filter(Boolean)
+        )],
+        splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
+        note: String(e.note || '').slice(0, 120),
+        shares: numberMap(e.shares, remap, 1),
+        exact: numberMap(e.exact, remap, 0),
+      };
+    })
+    .filter(e => e && e.participants.length);
+
+  const usedSettlementIds = new Set();
   trip.settlements = (Array.isArray(t.settlements) ? t.settlements : [])
-    .filter(s => s && ids.has(s.fromId) && ids.has(s.toId) && Number(s.cents) > 0)
-    .map(s => ({ id: s.id || uid(), fromId: s.fromId, toId: s.toId, cents: Math.round(Number(s.cents)), date: s.date || todayISO() }));
-  trip.rates = Object.assign({ ...DEFAULT_RATES }, t.rates || {});
+    .map(s => {
+      if (!s) return null;
+      const fromId = remap[String(s.fromId)], toId = remap[String(s.toId)];
+      const cents = Math.round(num(s.cents, 0));
+      if (!fromId || !toId || !(cents > 0)) return null;
+      let id = safeId(s.id);
+      if (usedSettlementIds.has(id)) id = uid();
+      usedSettlementIds.add(id);
+      return { id, fromId, toId, cents, date: s.date || todayISO() };
+    })
+    .filter(Boolean);
+
+  /* Only real, positive rates for currencies we know — a rate of
+     "not-a-number" would render the whole trip as S$NaN. */
+  trip.rates = { ...DEFAULT_RATES };
+  Object.keys(t.rates || {}).forEach(code => {
+    const r = num(t.rates[code], 0);
+    if (CUR[code] && r > 0) trip.rates[code] = r;
+  });
+
+  trip.meId = remap[String(t.meId)] || null;
   if (!trip.people.some(p => p.id === trip.meId)) trip.meId = null;
   return trip;
 }
@@ -183,18 +261,24 @@ function splitOf(exp, trip = state) {
       const c = centsOf(exp.exact?.[id] || 0, exp.rate);
       out[id] = c; sum += c;
     });
-    // absorb any rounding gap on the largest line so it still ties to the total
     const gap = total - sum;
-    if (gap !== 0) {
+    if (gap === 0) return out;
+    /* A cent or two is rounding: absorb it on the largest line so the
+       parts still tie to the total. A bigger gap means these exact
+       amounts no longer describe this expense — someone was removed
+       from it, most likely — and dropping that whole difference on one
+       person would quietly overcharge them. Fall through to an even
+       split instead. */
+    if (Math.abs(gap) <= ids.length) {
       const biggest = ids.reduce((a, b) => (out[b] > out[a] ? b : a), ids[0]);
       out[biggest] += gap;
+      return out;
     }
-    return out;
   }
 
   const weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
   const W = weights.reduce((a, b) => a + b, 0);
-  if (W <= 0) { ids.forEach(id => out[id] = 0); return out; }
+  if (!(W > 0)) { ids.forEach(id => out[id] = 0); return out; }   // also catches NaN
 
   const raw = weights.map(w => total * w / W);
   const floors = raw.map(Math.floor);
@@ -1234,7 +1318,21 @@ function wireTrip() {
       || state.settlements.some(s => s.fromId === id || s.toId === id);
     if (used && !confirm(`${pname(id)} appears in existing expenses.\n\nRemove them anyway? Expenses they only shared in get re-split between whoever is left, and expenses they paid for will be deleted.`)) return;
     state.people = state.people.filter(p => p.id !== id);
-    state.expenses.forEach(x => { x.participants = (x.participants || []).filter(pid => pid !== id); });
+    state.expenses.forEach(x => {
+      x.participants = (x.participants || []).filter(pid => pid !== id);
+      /* Drop their weight/amount too, or it lingers and gets charged to
+         someone else. For an exact split their share leaves a hole the
+         remaining amounts no longer fill, so re-split evenly — which is
+         what the confirmation above promised. */
+      if (x.shares) delete x.shares[id];
+      if (x.exact) {
+        delete x.exact[id];
+        if (x.splitMode === 'exact') {
+          const tot = Object.values(x.exact).reduce((a, b) => a + (Number(b) || 0), 0);
+          if (Math.abs(tot - x.amount) > 0.005) { x.splitMode = 'equal'; x.exact = {}; }
+        }
+      }
+    });
     state.expenses = state.expenses.filter(x => personById(x.payerId) && x.participants.length);
     state.settlements = state.settlements.filter(s => personById(s.fromId) && personById(s.toId));
     if (state.meId === id) state.meId = null;
