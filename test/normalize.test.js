@@ -6,7 +6,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { blankTrip, normalizeTrip, DEFAULT_RATES, TRIP_ICONS, CATEGORIES } = require('../app.js');
+const { blankTrip, normalizeTrip, centsOf, DEFAULT_RATES, TRIP_ICONS, CATEGORIES } = require('../app.js');
 
 const TODAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -263,6 +263,49 @@ describe('normalizeTrip — the rate table', () => {
     const t = normalizeTrip({ rates: { JPY: 0.0095 } });
     assert.deepEqual(Object.keys(t.rates).sort(), Object.keys(DEFAULT_RATES).sort());
     assert.equal(t.rates.USD, DEFAULT_RATES.USD);
+  });
+
+  test('a rate that is not a usable number falls back to the default', () => {
+    for (const bad of ['soon', NaN, null, undefined, {}, [], Infinity, true]) {
+      const t = normalizeTrip({ rates: { JPY: bad } });
+      assert.equal(t.rates.JPY, DEFAULT_RATES.JPY, `JPY: ${JSON.stringify(bad)}`);
+    }
+  });
+
+  test('a rate of zero or less falls back to the default', () => {
+    for (const bad of [0, -1, -0.0088]) {
+      assert.equal(normalizeTrip({ rates: { JPY: bad } }).rates.JPY, DEFAULT_RATES.JPY, `JPY: ${bad}`);
+    }
+  });
+
+  test('a numeric string is accepted, since that is what a rate input gives', () => {
+    assert.equal(normalizeTrip({ rates: { JPY: '0.0095' } }).rates.JPY, 0.0095);
+  });
+
+  test('drops a rate for a currency the app does not list', () => {
+    const t = normalizeTrip({ rates: { DOGE: 0.3 } });
+    assert.equal(t.rates.DOGE, undefined);
+    assert.deepEqual(Object.keys(t.rates).sort(), Object.keys(DEFAULT_RATES).sort());
+  });
+
+  test('the base currency is pinned to 1', () => {
+    assert.equal(normalizeTrip({ rates: { SGD: 0.5 } }).rates.SGD, 1);
+  });
+
+  test('a bad rate cannot poison the next expense entered', () => {
+    // rateFor reads this table and hands the result to centsOf, so a
+    // rate of NaN here would turn the whole trip total into NaN
+    const t = normalizeTrip({ rates: { JPY: 'soon' } });
+    assert.ok(Number.isFinite(t.rates.JPY));
+    assert.equal(centsOf(1000, t.rates.JPY), 880);
+  });
+
+  test('every rate that survives is a positive, finite number', () => {
+    const t = normalizeTrip({ rates: { JPY: 'soon', USD: -4, THB: 0, EUR: 1.5, DOGE: 9 } });
+    for (const [code, rate] of Object.entries(t.rates)) {
+      assert.ok(Number.isFinite(rate) && rate > 0, `${code} = ${rate}`);
+    }
+    assert.equal(t.rates.EUR, 1.5, 'a good rate is still kept');
   });
 
   test('normalizing twice is a no-op', () => {
