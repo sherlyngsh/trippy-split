@@ -1395,10 +1395,33 @@ if (typeof document !== 'undefined') boot();
 /* Exposed for the node test harness (no effect in the browser). */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    /* pure money and trip logic */
     centsOf, sgd, foreign, splitOf, balancesFor, settlePlan, catTotals,
     blankTrip, normalizeTrip, tripTotalCents,
-    DEFAULT_RATES, CATEGORIES, CURRENCIES, TRIP_ICONS,
+    DEFAULT_RATES, CATEGORIES, CURRENCIES, TRIP_ICONS, AVATARS, BASE,
+
+    /* small helpers */
+    esc, todayISO, prettyDate, tripDateLabel, rateFor, isForeign, uid,
+    personIn, pname, pav,
+
+    /* views, renders and handlers — these need a document */
+    boot, render, renderTrips, renderPeople, renderPickers, renderSplitList,
+    renderStats, renderBalances, renderSettlements, renderBreakdown, renderLog,
+    renderYou, renderRatesGrid, buildSummary, buildStaticControls, syncFxStrip,
+    resetForm, setMode, setCat, loadForEdit, submitExpense,
+    createTrip, deleteTrip, openTrip, openNewTripForm, showTrips, showAuth,
+    setAuthMode, enterApp, signOut, toast, setView,
+    submitAuth, demoSignIn, showAuthError, hideAuthError, busy,
+    exportJSON, importJSON, sampleTrip, addSampleTrip, save, loadAccountData,
+
+    /* module state, so a test can arrange and inspect it */
     setState: t => { state = t; },
     getState: () => state,
+    setAccount: a => { account = a; },
+    getAccount: () => account,
+    setDb: d => { db = d; },
+    getDb: () => db,
+    getUi: () => ui,
+    setUi: u => { ui = u; },
   };
 }
