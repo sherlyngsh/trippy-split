@@ -238,8 +238,12 @@ function splitOf(exp, trip = state) {
     return out;
   }
 
-  const weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
-  if (weights.reduce((a, b) => a + b, 0) <= 0) { ids.forEach(id => out[id] = 0); return out; }
+  let weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
+  /* No shares left to weight by — the only people holding any have been
+     removed from the trip. Weighting by nothing would charge the bill to
+     nobody and leave the payer silently out of pocket, with no debt for
+     the settle plan to clear, so fall back to an equal split. */
+  if (weights.reduce((a, b) => a + b, 0) <= 0) weights = ids.map(() => 1);
   apportion(total, weights).forEach((c, i) => out[ids[i]] = c);
   return out;
 }
