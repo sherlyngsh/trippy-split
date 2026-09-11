@@ -140,7 +140,18 @@ function normalizeTrip(t) {
   trip.settlements = (Array.isArray(t.settlements) ? t.settlements : [])
     .filter(s => s && ids.has(s.fromId) && ids.has(s.toId) && Number(s.cents) > 0)
     .map(s => ({ id: s.id || uid(), fromId: s.fromId, toId: s.toId, cents: Math.round(Number(s.cents)), date: s.date || todayISO() }));
-  trip.rates = Object.assign({ ...DEFAULT_RATES }, t.rates || {});
+  /* Only a usable rate is worth keeping. Anything else — a rate for a
+     currency we do not list, or one that is zero, negative or not a
+     number — falls back to the shipped default, because rateFor hands
+     whatever is here straight to the next expense the user enters. */
+  trip.rates = { ...DEFAULT_RATES };
+  Object.entries(t.rates || {}).forEach(([code, value]) => {
+    if (!(code in DEFAULT_RATES)) return;
+    if (typeof value !== 'number' && typeof value !== 'string') return;
+    const rate = Number(value);
+    if (Number.isFinite(rate) && rate > 0) trip.rates[code] = rate;
+  });
+  trip.rates[BASE] = 1;
   if (!trip.people.some(p => p.id === trip.meId)) trip.meId = null;
   return trip;
 }
