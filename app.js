@@ -112,26 +112,46 @@ function normalizeTrip(t) {
   const ids = new Set(trip.people.map(p => p.id));
   trip.expenses = (Array.isArray(t.expenses) ? t.expenses : [])
     .filter(e => e && e.id && ids.has(e.payerId))
-    .map(e => ({
-      id: e.id, created: e.created || Date.now(),
-      title: String(e.title || 'Expense').slice(0, 60),
-      amount: Number(e.amount) || 0,
-      currency: CUR[e.currency] ? e.currency : BASE,
-      rate: Number(e.rate) > 0 ? Number(e.rate) : (DEFAULT_RATES[e.currency] || 1),
-      category: CAT[e.category] ? e.category : 'other',
-      date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
-      payerId: e.payerId,
-      participants: (Array.isArray(e.participants) ? e.participants : []).filter(id => ids.has(id)),
-      splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
-      note: String(e.note || '').slice(0, 120),
-      shares: e.shares && typeof e.shares === 'object' ? e.shares : {},
-      exact: e.exact && typeof e.exact === 'object' ? e.exact : {},
-    }))
+    .map(e => {
+      const currency = CUR[e.currency] ? e.currency : BASE;
+      const saved = Number(e.rate);
+      /* Resolve the rate against the currency we settled on, not the one
+         that was asked for: a rate saved against a currency we do not know
+         must not survive the fall back to SGD, or the expense would come
+         back converted at a rate for nothing. SGD is the base, so it is
+         always 1 — the same rule submitExpense applies. */
+      const rate = currency === BASE ? 1 : (saved > 0 ? saved : DEFAULT_RATES[currency]);
+      return {
+        id: e.id, created: e.created || Date.now(),
+        title: String(e.title || 'Expense').slice(0, 60),
+        amount: Number(e.amount) || 0,
+        currency, rate,
+        category: CAT[e.category] ? e.category : 'other',
+        date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
+        payerId: e.payerId,
+        participants: (Array.isArray(e.participants) ? e.participants : []).filter(id => ids.has(id)),
+        splitMode: ['equal', 'shares', 'exact'].includes(e.splitMode) ? e.splitMode : 'equal',
+        note: String(e.note || '').slice(0, 120),
+        shares: e.shares && typeof e.shares === 'object' ? e.shares : {},
+        exact: e.exact && typeof e.exact === 'object' ? e.exact : {},
+      };
+    })
     .filter(e => e.participants.length);
   trip.settlements = (Array.isArray(t.settlements) ? t.settlements : [])
     .filter(s => s && ids.has(s.fromId) && ids.has(s.toId) && Number(s.cents) > 0)
     .map(s => ({ id: s.id || uid(), fromId: s.fromId, toId: s.toId, cents: Math.round(Number(s.cents)), date: s.date || todayISO() }));
-  trip.rates = Object.assign({ ...DEFAULT_RATES }, t.rates || {});
+  /* Only a usable rate is worth keeping. Anything else — a rate for a
+     currency we do not list, or one that is zero, negative or not a
+     number — falls back to the shipped default, because rateFor hands
+     whatever is here straight to the next expense the user enters. */
+  trip.rates = { ...DEFAULT_RATES };
+  Object.entries(t.rates || {}).forEach(([code, value]) => {
+    if (!(code in DEFAULT_RATES)) return;
+    if (typeof value !== 'number' && typeof value !== 'string') return;
+    const rate = Number(value);
+    if (Number.isFinite(rate) && rate > 0) trip.rates[code] = rate;
+  });
+  trip.rates[BASE] = 1;
   if (!trip.people.some(p => p.id === trip.meId)) trip.meId = null;
   return trip;
 }
@@ -170,6 +190,19 @@ function foreign(amount, code) {
 const rateFor = code => Number((state && state.rates[code]) ?? DEFAULT_RATES[code] ?? 1);
 const isForeign = code => code !== BASE;
 
+/* Split `total` cents across `weights`, handing the leftover cents to the
+   biggest fractional remainders so the parts add back up to it exactly. */
+function apportion(total, weights) {
+  const W = weights.reduce((a, b) => a + b, 0);
+  if (W <= 0) return weights.map(() => 0);
+  const raw = weights.map(w => total * w / W);
+  const parts = raw.map(Math.floor);
+  let left = total - parts.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0]);
+  for (let k = 0; k < order.length && left > 0; k++, left--) parts[order[k][1]]++;
+  return parts;
+}
+
 /* Split one expense into { personId: sgdCents } that sums exactly to the total. */
 function splitOf(exp, trip = state) {
   const total = centsOf(exp.amount, exp.rate);
@@ -183,27 +216,35 @@ function splitOf(exp, trip = state) {
       const c = centsOf(exp.exact?.[id] || 0, exp.rate);
       out[id] = c; sum += c;
     });
-    // absorb any rounding gap on the largest line so it still ties to the total
     const gap = total - sum;
-    if (gap !== 0) {
+    if (gap === 0) return out;
+
+    /* Under a cent per person, the gap is rounding: each line is converted
+       on its own, so they cannot always land on the same figure as the
+       whole bill. Absorb it on the largest line. */
+    if (Math.abs(gap) < ids.length) {
       const biggest = ids.reduce((a, b) => (out[b] > out[a] ? b : a), ids[0]);
       out[biggest] += gap;
+      return out;
     }
+
+    /* A bigger gap means the amounts on file no longer describe this bill —
+       a traveller has been removed and their share left behind. Re-split it
+       between whoever is left, in proportion to what they were already
+       down for, rather than landing all of it on one person. */
+    const entered = ids.map(id => Math.max(0, out[id]));
+    const share = apportion(gap, entered.some(c => c > 0) ? entered : ids.map(() => 1));
+    ids.forEach((id, i) => out[id] += share[i]);
     return out;
   }
 
-  const weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
-  const W = weights.reduce((a, b) => a + b, 0);
-  if (W <= 0) { ids.forEach(id => out[id] = 0); return out; }
-
-  const raw = weights.map(w => total * w / W);
-  const floors = raw.map(Math.floor);
-  let left = total - floors.reduce((a, b) => a + b, 0);
-  // hand out the leftover cents to the biggest fractional remainders first
-  const order = raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0]);
-  const add = floors.slice();
-  for (let k = 0; k < order.length && left > 0; k++, left--) add[order[k][1]]++;
-  ids.forEach((id, i) => out[id] = add[i]);
+  let weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
+  /* No shares left to weight by — the only people holding any have been
+     removed from the trip. Weighting by nothing would charge the bill to
+     nobody and leave the payer silently out of pocket, with no debt for
+     the settle plan to clear, so fall back to an equal split. */
+  if (weights.reduce((a, b) => a + b, 0) <= 0) weights = ids.map(() => 1);
+  apportion(total, weights).forEach((c, i) => out[ids[i]] = c);
   return out;
 }
 
@@ -1395,10 +1436,33 @@ if (typeof document !== 'undefined') boot();
 /* Exposed for the node test harness (no effect in the browser). */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    /* pure money and trip logic */
     centsOf, sgd, foreign, splitOf, balancesFor, settlePlan, catTotals,
     blankTrip, normalizeTrip, tripTotalCents,
-    DEFAULT_RATES, CATEGORIES, CURRENCIES, TRIP_ICONS,
+    DEFAULT_RATES, CATEGORIES, CURRENCIES, TRIP_ICONS, AVATARS, BASE,
+
+    /* small helpers */
+    esc, todayISO, prettyDate, tripDateLabel, rateFor, isForeign, uid,
+    personIn, pname, pav,
+
+    /* views, renders and handlers — these need a document */
+    boot, render, renderTrips, renderPeople, renderPickers, renderSplitList,
+    renderStats, renderBalances, renderSettlements, renderBreakdown, renderLog,
+    renderYou, renderRatesGrid, buildSummary, buildStaticControls, syncFxStrip,
+    resetForm, setMode, setCat, loadForEdit, submitExpense,
+    createTrip, deleteTrip, openTrip, openNewTripForm, showTrips, showAuth,
+    setAuthMode, enterApp, signOut, toast, setView,
+    submitAuth, demoSignIn, showAuthError, hideAuthError, busy,
+    exportJSON, importJSON, sampleTrip, addSampleTrip, save, loadAccountData,
+
+    /* module state, so a test can arrange and inspect it */
     setState: t => { state = t; },
     getState: () => state,
+    setAccount: a => { account = a; },
+    getAccount: () => account,
+    setDb: d => { db = d; },
+    getDb: () => db,
+    getUi: () => ui,
+    setUi: u => { ui = u; },
   };
 }

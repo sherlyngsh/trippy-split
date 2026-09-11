@@ -97,6 +97,27 @@ use Export/Import to sync, or nominate one bookkeeper.
 | `auth.js` | accounts: PBKDF2 hashing, sign up / in / out, sessions |
 | `store.js` | per-account persistence (one localStorage bucket per user) |
 | `app.js` | views, trips, and the expense tracker: currencies, splitting, balances, settlement, rendering |
+| `test/` | the test suite — node's built-in runner, still no dependencies |
+
+## Tests
+
+```
+npm test          # run the suite
+npm run coverage  # run it with a coverage report
+```
+
+There is nothing to install: the suite uses `node --test`, which ships with
+node (18.13+ for the runner, 22+ for the coverage report). `package.json`
+exists only to hold those two commands — the app itself is still a folder of
+files you open in a browser.
+
+The browser bits are stood in for rather than emulated. `test/helpers/`
+holds an in-memory `localStorage`, and a recording DOM whose elements keep
+whatever a render wrote into them, so a test can read back the markup and
+values the app produced. That covers the money maths, the trip validation,
+accounts and storage, every render, and the click and submit handlers —
+what it cannot cover is layout, real event bubbling, or anything needing an
+HTML parser.
 
 ## How the money maths works
 

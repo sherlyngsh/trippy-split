@@ -1,0 +1,10 @@
+{
+  "name": "trippy-split",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Holiday expense tracker — a zero-dependency browser app. This manifest exists only to run the test suite; the app itself still needs no install step.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='test/**' test/*.test.js"
+  }
+}
