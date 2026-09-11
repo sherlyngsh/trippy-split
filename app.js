@@ -190,6 +190,19 @@ function foreign(amount, code) {
 const rateFor = code => Number((state && state.rates[code]) ?? DEFAULT_RATES[code] ?? 1);
 const isForeign = code => code !== BASE;
 
+/* Split `total` cents across `weights`, handing the leftover cents to the
+   biggest fractional remainders so the parts add back up to it exactly. */
+function apportion(total, weights) {
+  const W = weights.reduce((a, b) => a + b, 0);
+  if (W <= 0) return weights.map(() => 0);
+  const raw = weights.map(w => total * w / W);
+  const parts = raw.map(Math.floor);
+  let left = total - parts.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0]);
+  for (let k = 0; k < order.length && left > 0; k++, left--) parts[order[k][1]]++;
+  return parts;
+}
+
 /* Split one expense into { personId: sgdCents } that sums exactly to the total. */
 function splitOf(exp, trip = state) {
   const total = centsOf(exp.amount, exp.rate);
@@ -203,27 +216,31 @@ function splitOf(exp, trip = state) {
       const c = centsOf(exp.exact?.[id] || 0, exp.rate);
       out[id] = c; sum += c;
     });
-    // absorb any rounding gap on the largest line so it still ties to the total
     const gap = total - sum;
-    if (gap !== 0) {
+    if (gap === 0) return out;
+
+    /* Under a cent per person, the gap is rounding: each line is converted
+       on its own, so they cannot always land on the same figure as the
+       whole bill. Absorb it on the largest line. */
+    if (Math.abs(gap) < ids.length) {
       const biggest = ids.reduce((a, b) => (out[b] > out[a] ? b : a), ids[0]);
       out[biggest] += gap;
+      return out;
     }
+
+    /* A bigger gap means the amounts on file no longer describe this bill —
+       a traveller has been removed and their share left behind. Re-split it
+       between whoever is left, in proportion to what they were already
+       down for, rather than landing all of it on one person. */
+    const entered = ids.map(id => Math.max(0, out[id]));
+    const share = apportion(gap, entered.some(c => c > 0) ? entered : ids.map(() => 1));
+    ids.forEach((id, i) => out[id] += share[i]);
     return out;
   }
 
   const weights = ids.map(id => exp.splitMode === 'shares' ? Math.max(0, Number(exp.shares?.[id] ?? 1)) : 1);
-  const W = weights.reduce((a, b) => a + b, 0);
-  if (W <= 0) { ids.forEach(id => out[id] = 0); return out; }
-
-  const raw = weights.map(w => total * w / W);
-  const floors = raw.map(Math.floor);
-  let left = total - floors.reduce((a, b) => a + b, 0);
-  // hand out the leftover cents to the biggest fractional remainders first
-  const order = raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0]);
-  const add = floors.slice();
-  for (let k = 0; k < order.length && left > 0; k++, left--) add[order[k][1]]++;
-  ids.forEach((id, i) => out[id] = add[i]);
+  if (weights.reduce((a, b) => a + b, 0) <= 0) { ids.forEach(id => out[id] = 0); return out; }
+  apportion(total, weights).forEach((c, i) => out[ids[i]] = c);
   return out;
 }
 
